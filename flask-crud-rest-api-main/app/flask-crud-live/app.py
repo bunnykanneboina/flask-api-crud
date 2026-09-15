@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, render_template
 from flask_sqlalchemy import SQLAlchemy
 from os import environ
 
@@ -24,6 +24,11 @@ with app.app_context():
     db.create_all()
 
 
+@app.route("/", methods=["GET"])
+def home():
+    return render_template("index.html")
+
+
 @app.route("/test", methods=["GET"])
 def test():
     return make_response(jsonify({"message": "test route"}), 200)
@@ -41,6 +46,7 @@ def create_user():
         db.session.commit()
         return make_response(jsonify({"message": "user created"}), 201)
     except Exception:
+        db.session.rollback()
         return make_response(jsonify({"message": "error creating user"}), 500)
 
 
@@ -80,6 +86,7 @@ def update_user(id):
         db.session.commit()
         return make_response(jsonify({"message": "user updated"}), 200)
     except Exception:
+        db.session.rollback()
         return make_response(jsonify({"message": "error updating user"}), 500)
 
 
@@ -93,9 +100,9 @@ def delete_user(id):
             return make_response(jsonify({"message": "user deleted"}), 200)
         return make_response(jsonify({"message": "user not found"}), 404)
     except Exception:
+        db.session.rollback()
         return make_response(jsonify({"message": "error deleting user"}), 500)
 
 
 if __name__ == "__main__":
     app.run(debug=True)
-    
