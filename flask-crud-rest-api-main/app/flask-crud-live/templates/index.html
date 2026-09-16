@@ -3,35 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flask CRUD API</title>
+    <meta name="description" content="Modern Flask CRUD API dashboard for managing users.">
+    <title>Flask CRUD | Smart User Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Flask CRUD API</h1>
-            <p>Manage users using your Flask REST API</p>
-        </header>
-
-        <section class="card">
-            <h2>Add User</h2>
-            <form id="userForm">
-                <input type="text" id="username" placeholder="Username" required>
-                <input type="email" id="email" placeholder="Email" required>
-                <button type="submit">Add User</button>
-            </form>
-            <p id="message"></p>
-        </section>
-
-        <section class="card">
-            <div class="section-title">
-                <h2>Users</h2>
-                <button type="button" onclick="loadUsers()">Refresh</button>
-            </div>
-            <div id="users" class="users"></div>
-        </section>
+    <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+            <div class="brand"><div class="brand-mark">F</div><div><strong>Flask CRUD</strong><span>Smart Dashboard</span></div></div>
+            <nav class="nav">
+                <button class="nav-item active" data-scroll="dashboard">◈ <span>Dashboard</span></button>
+                <button class="nav-item" data-scroll="users-section">♙ <span>Users</span></button>
+                <button class="nav-item" data-scroll="api-section">⌁ <span>API Monitor</span></button>
+            </nav>
+            <div class="sidebar-footer"><div class="api-status"><span class="status-dot"></span><span id="connectionText">Checking API...</span></div><small>Flask + SQLAlchemy</small></div>
+        </aside>
+        <main class="main-content" id="dashboard">
+            <header class="topbar">
+                <button class="icon-btn mobile-menu" id="menuBtn" aria-label="Open menu">☰</button>
+                <div><p class="eyebrow">CONTROL CENTER</p><h1>User Management</h1></div>
+                <div class="top-actions"><button class="icon-btn" id="themeBtn" title="Toggle theme">☾</button><button class="primary-btn" id="openAddBtn">＋ Add User</button></div>
+            </header>
+            <section class="hero-card"><div><span class="hero-badge">LIVE API</span><h2>Manage your users intelligently.</h2><p>Create, search, edit and remove records through your Flask REST API from one responsive interface.</p></div><div class="hero-orb"><span>API</span></div></section>
+            <section class="stats-grid">
+                <article class="stat-card"><span class="stat-icon">♙</span><div><span>Total Users</span><strong id="totalUsers">0</strong><small>Live database count</small></div></article>
+                <article class="stat-card"><span class="stat-icon">✓</span><div><span>API Status</span><strong id="apiStatus">—</strong><small id="apiLatency">Waiting for check</small></div></article>
+                <article class="stat-card"><span class="stat-icon">⌕</span><div><span>Visible Results</span><strong id="visibleUsers">0</strong><small>After search / sort</small></div></article>
+                <article class="stat-card"><span class="stat-icon">⚡</span><div><span>Last Action</span><strong id="lastAction">Ready</strong><small id="lastActionTime">No actions yet</small></div></article>
+            </section>
+            <section class="panel" id="users-section">
+                <div class="panel-header"><div><h2>Users</h2><p>Real-time records from <code>/users</code></p></div><button class="secondary-btn" id="refreshBtn">↻ Refresh</button></div>
+                <div class="toolbar"><div class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Search username or email..." autocomplete="off"></div><select id="sortSelect"><option value="id-desc">Newest first</option><option value="id-asc">Oldest first</option><option value="name-asc">Name A–Z</option><option value="name-desc">Name Z–A</option><option value="email-asc">Email A–Z</option></select></div>
+                <div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead><tbody id="usersTable"><tr><td colspan="5" class="empty">Loading users...</td></tr></tbody></table></div>
+                <div class="panel-footer"><span id="tableSummary">Loading...</span><span>Auto-refresh: manual</span></div>
+            </section>
+            <section class="panel api-panel" id="api-section"><div class="panel-header"><div><h2>API Monitor</h2><p>Quick health check for your Flask backend</p></div><span class="method-pill">GET /test</span></div><div class="api-result" id="apiResult"><span class="pulse"></span><span>Run a health check to verify the backend connection.</span><button class="secondary-btn" id="healthBtn">Run Health Check</button></div></section>
+            <footer><span>Built with Flask REST API</span><span>Smart CRUD Dashboard</span></footer>
+        </main>
     </div>
-
+    <div class="modal-backdrop" id="modalBackdrop" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-header"><div><p class="eyebrow" id="modalEyebrow">CREATE RECORD</p><h2 id="modalTitle">Add User</h2></div><button class="close-btn" id="closeModal">×</button></div><form id="userForm"><input type="hidden" id="userId"><label>Username<input id="username" name="username" required maxlength="80" placeholder="e.g. bhavani"></label><label>Email<input id="email" name="email" type="email" required maxlength="120" placeholder="e.g. bhavani@example.com"></label><div class="form-actions"><button type="button" class="secondary-btn" id="cancelBtn">Cancel</button><button type="submit" class="primary-btn" id="saveBtn">Create User</button></div></form></div></div>
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
