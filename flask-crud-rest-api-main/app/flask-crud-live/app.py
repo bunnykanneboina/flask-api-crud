@@ -9,6 +9,15 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
+ALLOWED_TYPES = {
+    "Phishing", "Malware", "Ransomware", "Brute Force", "Data Breach",
+    "Unauthorized Access", "DDoS", "Insider Threat", "Vulnerability",
+    "Suspicious Activity", "Other"
+}
+ALLOWED_SEVERITY = {"Low", "Medium", "High", "Critical"}
+ALLOWED_STATUS = {"Open", "Investigating", "Contained", "Resolved", "Closed"}
+ALLOWED_PRIORITY = {"Low", "Medium", "High", "Critical"}
+
 
 class Incident(db.Model):
     __tablename__ = "incidents"
@@ -42,7 +51,7 @@ class Incident(db.Model):
             "affected_system": self.affected_system,
             "reported_by": self.reported_by,
             "assigned_to": self.assigned_to,
-            "detection_date": self.detection_date.isoformat() if self.detection_date else None,
+            "detection_date": self.detection_date.isoformat(),
             "resolution_date": self.resolution_date.isoformat() if self.resolution_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
@@ -60,77 +69,76 @@ def home():
 
 @app.route("/test", methods=["GET"])
 def test():
-    return make_response(jsonify({"message": "Cybersecurity Incident API is running"}), 200)
+    return jsonify({"message": "Cybersecurity Incident API is running", "status": "online"}), 200
 
 
 def parse_date(value):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
-    except ValueError:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, TypeError):
         return None
 
 
 def validate_incident_data(data, partial=False):
+    if not isinstance(data, dict):
+        return "Request body must be valid JSON"
+
     required = [
         "title", "description", "incident_type", "severity", "status",
         "priority", "affected_system", "reported_by", "assigned_to", "detection_date"
     ]
 
-    if not data:
-        return "Request body is required"
-
     if not partial:
-        missing = [field for field in required if not data.get(field)]
+        missing = [field for field in required if not str(data.get(field, "")).strip()]
         if missing:
             return "Missing required fields: " + ", ".join(missing)
 
-    for field in ["severity", "status", "priority", "incident_type"]:
+    for field, allowed in {
+        "incident_type": ALLOWED_TYPES,
+        "severity": ALLOWED_SEVERITY,
+        "status": ALLOWED_STATUS,
+        "priority": ALLOWED_PRIORITY
+    }.items():
+        if field in data and data[field] not in allowed:
+            return f"Invalid {field}"
+
+    for field in ["title", "description", "affected_system", "reported_by", "assigned_to"]:
         if field in data and not str(data[field]).strip():
             return f"{field} cannot be empty"
 
-    if "detection_date" in data and data.get("detection_date") and not parse_date(data["detection_date"]):
-        return "Invalid detection date"
+    if "detection_date" in data:
+        if not data["detection_date"] or not parse_date(data["detection_date"]):
+            return "Invalid detection date"
 
-    if "resolution_date" in data and data.get("resolution_date") and not parse_date(data["resolution_date"]):
+    if "resolution_date" in data and data["resolution_date"] and not parse_date(data["resolution_date"]):
         return "Invalid resolution date"
-
-    allowed_severity = {"Low", "Medium", "High", "Critical"}
-    allowed_status = {"Open", "Investigating", "Contained", "Resolved", "Closed"}
-    allowed_priority = {"Low", "Medium", "High", "Critical"}
-
-    if data.get("severity") not in allowed_severity:
-        return "Invalid severity"
-    if data.get("status") not in allowed_status:
-        return "Invalid status"
-    if data.get("priority") not in allowed_priority:
-        return "Invalid priority"
 
     return None
 
 
+def next_incident_id():
+    last = Incident.query.order_by(Incident.id.desc()).first()
+    number = last.id + 1 if last else 1
+    while Incident.query.filter_by(incident_id=f"INC-{number:04d}").first():
+        number += 1
+    return f"INC-{number:04d}"
+
+
 @app.route("/incidents", methods=["POST"])
 def create_incident():
+    data = request.get_json(silent=True)
+    error = validate_incident_data(data)
+    if error:
+        return jsonify({"message": error}), 400
+
     try:
-        data = request.get_json(silent=True)
-        error = validate_incident_data(data)
-        if error:
-            return make_response(jsonify({"message": error}), 400)
-
-        last_incident = Incident.query.order_by(Incident.id.desc()).first()
-        next_number = (last_incident.id + 1) if last_incident else 1
-        incident_id = f"INC-{next_number:03d}"
-
-        while Incident.query.filter_by(incident_id=incident_id).first():
-            next_number += 1
-            incident_id = f"INC-{next_number:03d}"
-
         incident = Incident(
-            incident_id=incident_id,
+            incident_id=next_incident_id(),
             title=str(data["title"]).strip(),
             description=str(data["description"]).strip(),
-            incident_type=str(data["incident_type"]).strip(),
+            incident_type=data["incident_type"],
             severity=data["severity"],
             status=data["status"],
             priority=data["priority"],
@@ -140,13 +148,14 @@ def create_incident():
             detection_date=parse_date(data["detection_date"]),
             resolution_date=parse_date(data.get("resolution_date"))
         )
-
+        if incident.status in {"Resolved", "Closed"} and not incident.resolution_date:
+            incident.resolution_date = datetime.utcnow()
         db.session.add(incident)
         db.session.commit()
-        return make_response(jsonify({"message": "Incident reported successfully", "incident": incident.json()}), 201)
+        return jsonify({"message": "Incident reported successfully", "incident": incident.json()}), 201
     except Exception:
         db.session.rollback()
-        return make_response(jsonify({"message": "Error reporting incident"}), 500)
+        return jsonify({"message": "Error reporting incident"}), 500
 
 
 @app.route("/incidents", methods=["GET"])
@@ -158,26 +167,25 @@ def get_incidents():
         keyword = request.args.get("keyword", "").strip()
 
         if severity and severity != "All":
-            query = query.filter_by(severity=severity)
+            query = query.filter(Incident.severity == severity)
         if status and status != "All":
-            query = query.filter_by(status=status)
+            query = query.filter(Incident.status == status)
         if keyword:
             pattern = f"%{keyword}%"
-            query = query.filter(
-                db.or_(
-                    Incident.incident_id.ilike(pattern),
-                    Incident.title.ilike(pattern),
-                    Incident.incident_type.ilike(pattern),
-                    Incident.affected_system.ilike(pattern),
-                    Incident.reported_by.ilike(pattern),
-                    Incident.assigned_to.ilike(pattern)
-                )
-            )
+            query = query.filter(db.or_(
+                Incident.incident_id.ilike(pattern),
+                Incident.title.ilike(pattern),
+                Incident.description.ilike(pattern),
+                Incident.incident_type.ilike(pattern),
+                Incident.affected_system.ilike(pattern),
+                Incident.reported_by.ilike(pattern),
+                Incident.assigned_to.ilike(pattern)
+            ))
 
         incidents = query.order_by(Incident.id.desc()).all()
-        return make_response(jsonify([incident.json() for incident in incidents]), 200)
+        return jsonify([incident.json() for incident in incidents]), 200
     except Exception:
-        return make_response(jsonify({"message": "Error getting incidents"}), 500)
+        return jsonify({"message": "Error getting incidents"}), 500
 
 
 @app.route("/incidents/<int:id>", methods=["GET"])
@@ -185,32 +193,36 @@ def get_incident(id):
     try:
         incident = db.session.get(Incident, id)
         if not incident:
-            return make_response(jsonify({"message": "Incident not found"}), 404)
-        return make_response(jsonify({"incident": incident.json()}), 200)
+            return jsonify({"message": "Incident not found"}), 404
+        return jsonify({"incident": incident.json()}), 200
     except Exception:
-        return make_response(jsonify({"message": "Error getting incident"}), 500)
+        return jsonify({"message": "Error getting incident"}), 500
 
 
 @app.route("/incidents/<int:id>", methods=["PUT"])
 def update_incident(id):
+    incident = db.session.get(Incident, id)
+    if not incident:
+        return jsonify({"message": "Incident not found"}), 404
+
+    data = request.get_json(silent=True)
+    error = validate_incident_data(data, partial=True)
+    if error:
+        return jsonify({"message": error}), 400
+
     try:
-        incident = db.session.get(Incident, id)
-        if not incident:
-            return make_response(jsonify({"message": "Incident not found"}), 404)
-
-        data = request.get_json(silent=True)
-        error = validate_incident_data(data, partial=True)
-        if error:
-            return make_response(jsonify({"message": error}), 400)
-
-        fields = [
-            "title", "description", "incident_type", "severity", "status",
-            "priority", "affected_system", "reported_by", "assigned_to"
+        text_fields = [
+            "title", "description", "affected_system", "reported_by", "assigned_to"
         ]
+        choice_fields = ["incident_type", "severity", "status", "priority"]
 
-        for field in fields:
+        for field in text_fields:
             if field in data:
-                setattr(incident, field, str(data[field]).strip() if isinstance(data[field], str) else data[field])
+                setattr(incident, field, str(data[field]).strip())
+
+        for field in choice_fields:
+            if field in data:
+                setattr(incident, field, data[field])
 
         if "detection_date" in data:
             incident.detection_date = parse_date(data["detection_date"])
@@ -223,47 +235,40 @@ def update_incident(id):
             incident.resolution_date = None
 
         db.session.commit()
-        return make_response(jsonify({"message": "Incident managed successfully", "incident": incident.json()}), 200)
+        return jsonify({"message": "Incident managed successfully", "incident": incident.json()}), 200
     except Exception:
         db.session.rollback()
-        return make_response(jsonify({"message": "Error updating incident"}), 500)
+        return jsonify({"message": "Error updating incident"}), 500
 
 
 @app.route("/incidents/<int:id>", methods=["DELETE"])
 def archive_incident(id):
-    try:
-        incident = db.session.get(Incident, id)
-        if not incident:
-            return make_response(jsonify({"message": "Incident not found"}), 404)
+    incident = db.session.get(Incident, id)
+    if not incident:
+        return jsonify({"message": "Incident not found"}), 404
 
+    try:
         db.session.delete(incident)
         db.session.commit()
-        return make_response(jsonify({"message": "Incident archived successfully"}), 200)
+        return jsonify({"message": "Incident archived successfully"}), 200
     except Exception:
         db.session.rollback()
-        return make_response(jsonify({"message": "Error archiving incident"}), 500)
+        return jsonify({"message": "Error archiving incident"}), 500
 
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
-        total = Incident.query.count()
-        open_count = Incident.query.filter_by(status="Open").count()
-        investigating = Incident.query.filter_by(status="Investigating").count()
-        resolved = Incident.query.filter(Incident.status.in_(["Resolved", "Closed"])).count()
-        critical = Incident.query.filter_by(severity="Critical").count()
-        high = Incident.query.filter_by(severity="High").count()
-
-        return make_response(jsonify({
-            "total_incidents": total,
-            "open_incidents": open_count,
-            "investigating_incidents": investigating,
-            "resolved_incidents": resolved,
-            "critical_incidents": critical,
-            "high_incidents": high
-        }), 200)
+        return jsonify({
+            "total_incidents": Incident.query.count(),
+            "open_incidents": Incident.query.filter_by(status="Open").count(),
+            "investigating_incidents": Incident.query.filter_by(status="Investigating").count(),
+            "resolved_incidents": Incident.query.filter(Incident.status.in_(["Resolved", "Closed"])).count(),
+            "critical_incidents": Incident.query.filter_by(severity="Critical").count(),
+            "high_incidents": Incident.query.filter_by(severity="High").count()
+        }), 200
     except Exception:
-        return make_response(jsonify({"message": "Error getting dashboard statistics"}), 500)
+        return jsonify({"message": "Error getting dashboard statistics"}), 500
 
 
 if __name__ == "__main__":
